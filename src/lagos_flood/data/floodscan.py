@@ -47,6 +47,16 @@ COLUMN_PATTERNS: dict[str, tuple[str, ...]] = {
 
 LAGOS_ALIASES = {"lagos", "lagos state"}
 
+#: The HDX workbook has three sheets — Readme, admin1, admin2. Reading the
+#: default first sheet gets you the Readme, so the sheet is always named.
+DEFAULT_SHEET = "admin2"
+
+#: RP arrives as ordered text ranges, not numbers: "1-1.5" … ">10". Coercing it
+#: with to_numeric turns every value into NaN, silently deleting the column.
+RETURN_PERIOD_ORDER: tuple[str, ...] = (
+    "1-1.5", "1.5-2", "2-3", "3-4", "4-5", "5-7", "7-10", ">10",
+)
+
 
 def _is_hxl_row(row: pd.Series) -> bool:
     """True if a row looks like an HXL tag row rather than data."""
@@ -89,17 +99,33 @@ def inspect_file(path: Path | str, n_rows: int = 8) -> None:
     print(raw.head(n_rows).to_string())
 
 
-def _read_raw(path: Path | str, nrows: int | None = None) -> pd.DataFrame:
+def _read_raw(
+    path: Path | str,
+    nrows: int | None = None,
+    sheet: str | int | None = DEFAULT_SHEET,
+) -> pd.DataFrame:
     path = Path(path)
     if path.suffix.lower() in {".xlsx", ".xls"}:
-        return pd.read_excel(path, nrows=nrows)
+        available = pd.ExcelFile(path).sheet_names
+        chosen = sheet if sheet in available else (available[-1] if sheet else 0)
+        if sheet is not None and sheet not in available:
+            log.warning("sheet %r not in %s; using %r", sheet, available, chosen)
+        return pd.read_excel(path, sheet_name=chosen, nrows=nrows)
     return pd.read_csv(path, nrows=nrows, low_memory=False)
+
+
+def return_period_ordinal(values: pd.Series) -> pd.Series:
+    """Turn RP text ranges into an ordered 0-7 code usable as a feature."""
+    order = {label: i for i, label in enumerate(RETURN_PERIOD_ORDER)}
+    return values.astype(str).str.strip().map(order).astype("Int64")
 
 
 def load_floodscan(
     path: Path | str,
     *,
     admin1_filter: str | None = "Lagos",
+    country_filter: str | None = "NGA",
+    sheet: str | int | None = DEFAULT_SHEET,
     strict_names: bool = False,
     sfed_as_fraction: bool = True,
 ) -> pd.DataFrame:
@@ -111,7 +137,16 @@ def load_floodscan(
     ``sfed_as_fraction`` converts a 0–100 percentage column to a 0–1 fraction.
     The check is on the observed range, because HDX has shipped both.
     """
-    raw = _read_raw(path)
+    raw = _read_raw(path, sheet=sheet)
+
+    # The HDX workbook is multi-country. Filter on ISO3 before anything else —
+    # "Lagos" is unlikely to collide, but relying on that is not a plan.
+    if country_filter:
+        for column in ("iso3", "ISO3", "ADM0_PCODE"):
+            if column in raw.columns:
+                raw = raw.loc[raw[column].astype(str).str.upper() == country_filter.upper()]
+                log.info("country filter %r on %s: %d rows", country_filter, column, len(raw))
+                break
 
     if len(raw) and _is_hxl_row(raw.iloc[0]):
         log.info("dropping HXL tag row")
@@ -149,9 +184,15 @@ def load_floodscan(
                 f"Values present: {sorted(set(raw[matched['admin1']].astype(str)))[:10]}"
             )
 
-    for column in ("sfed_fraction", "sfed_baseline", "return_period"):
+    for column in ("sfed_fraction", "sfed_baseline"):
         if column in df.columns:
             df[column] = pd.to_numeric(df[column], errors="coerce")
+
+    # return_period stays as text. HDX ships it as ordered ranges ("1-1.5",
+    # ">10"), so to_numeric would blank the whole column.
+    if "return_period" in df.columns:
+        df["return_period"] = df["return_period"].astype(str).str.strip()
+        df["return_period_ordinal"] = return_period_ordinal(df["return_period"])
 
     df, unmatched = attach_lga_id(df, "admin2", strict=strict_names)
     if unmatched:
@@ -168,7 +209,10 @@ def load_floodscan(
             df[column] = df[column].clip(lower=0.0, upper=1.0)
 
     out_columns = ["lga_id", "lga", "date", "sfed_fraction"]
-    out_columns += [c for c in ("sfed_baseline", "return_period") if c in df.columns]
+    out_columns += [
+        c for c in ("sfed_baseline", "return_period", "return_period_ordinal")
+        if c in df.columns
+    ]
     return (
         df[out_columns]
         .drop_duplicates(subset=["lga_id", "date"])
