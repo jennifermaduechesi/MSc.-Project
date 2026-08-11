@@ -1,0 +1,39 @@
+# Data — never commit. FloodScan, ERA5 and IMERG all carry access terms, and the
+# files are far too large for git regardless.
+data/raw/*
+data/interim/*
+data/processed/*
+!data/**/.gitkeep
+
+# Generated outputs
+artefacts/*
+!artefacts/.gitkeep
+*.png
+*.pdf
+!docs/**/*.pdf
+
+# Credentials — CDS and Earthdata keys live in the environment, not the repo.
+.env
+.cdsapirc
+.netrc
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Notebooks
+.ipynb_checkpoints/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
