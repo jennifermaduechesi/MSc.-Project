@@ -5,7 +5,8 @@
 **Verified:** 11 August 2026
 **Method:** Crossref REST API (`api.crossref.org`) for DOI resolution and publisher metadata;
 NCBI eutils for PubMed Central identifiers; arXiv abstract pages for preprints; publisher
-pages for the remainder.
+pages for the remainder. Numerical claims quoted in the annotations were checked separately
+against full text where open access, publisher abstracts otherwise.
 
 ---
 
@@ -17,6 +18,8 @@ pages for the remainder.
 | Verified **with corrections** (author, journal, year, volume or title was wrong) | 20 |
 | **Could not verify — recommend dropping** | 1 |
 | Grey literature verified (no DOI, cite as reports) | 3 |
+| Numerical claims checked — correct as quoted | 20 of 23 |
+| Numerical claims wrong, mislabelled or incomplete | 3 (entries 34, 10, 35) |
 
 Every entry that carried an explicit DOI resolved successfully — **all 43 DOIs in the source
 document are real and point at real papers**. The problems are not invented DOIs; they are
@@ -106,22 +109,100 @@ substantive is lost.
 
 ---
 
-## What this report does *not* cover
+## Numerical claims — checked against the papers
 
-Verification here is **bibliographic** — authors, titles, journals, years, volumes, pages, DOIs.
-It does **not** confirm the numerical claims quoted in the source document's annotations. Several
-of those sit on entries whose authorship was wrong, so they carry no independent support and must
-be checked against the papers themselves before they appear in the dissertation:
+Every figure quoted in the source document's annotations was checked against the paper itself
+(full text where open, publisher abstract otherwise). **Twenty of twenty-three claims are
+correct.** One is wrong, one is mislabelled, and one is correct but materially incomplete.
 
-- **Entry 62** — benefit–cost ratio of 24–73, the 1.83× lead-time figure, 453 household surveys.
-  Attribution was wrong (Rai et al., not Shukla), so treat every number as unchecked.
-- **Entry 10** — RF 0.93 / XGBoost 0.92 / SVM 0.84. Same problem.
-- **Entry 34** — 94.3% and 94.1% accuracy, kappa 0.87/0.88.
-- **Entry 64** — the €400-per-€1 EFAS figure. The source document flags a competing 159:1 figure;
-  read Pappenberger et al. directly and quote whichever the paper actually states.
-- **Entry 9** — the source document already warns that the "XGBoost ≈91%" claim was not confirmed
-  on the abstract. It remains unconfirmed.
+### Wrong
+
+**Entry 34 (Tiwari et al., 2020) — the accuracies are misquoted.**
+
+| | Source document | Paper |
+|---|---|---|
+| 9 August 2018 | 94.3% | **94.73%** |
+| 21 August 2018 | 94.1% | **94.71%** |
+| Kappa | 0.87 / 0.88 | 0.87 / 0.88 ✓ |
+
+The paper states: *"The overall accuracy of the classification was found to be 94.73% and 94.71%
+with a kappa coefficient of 0.87 and 0.88 respectively."* The kappas are right; the accuracies
+each dropped a digit.
+
+### Mislabelled
+
+**Entry 10 (Kafi et al., 2025) — the numbers are right, the metric is unnamed.**
+The source calls 0.93 / 0.92 / 0.84 a "score". They are **ROC-AUC** values. Accuracy is a
+different and lower set of numbers, so an unlabelled quotation is ambiguous:
+
+| Model | ROC-AUC | Accuracy | Kappa |
+|---|---|---|---|
+| Random Forest | **0.93** | 0.857 | 0.714 |
+| XGBoost | **0.92** | 0.847 | 0.70 |
+| SVM | **0.84** | 0.757 | 0.515 |
+
+RF as top performer is confirmed. Quote these as ROC-AUC or quote the accuracies — do not mix.
+
+Worth noting for your own feature set: this paper's SHAP analysis ranks **settlement formality
+highest** (0.22), above elevation (0.20), population density (0.13) and rainfall (0.12).
+Informal settlement is a Nigerian urban-flood driver with an obvious Lagos analogue and no
+counterpart in your current static features.
+
+### Correct but incomplete
+
+**Entry 35 (Alonso-Sarria et al., 2025) — 0.941 is internal, not independent.**
+The mean accuracy of 0.941 (SD 0.048) is confirmed, as is a mean F1 of 0.931. But when the same
+method was validated against *independent* Sentinel-2 optical imagery, accuracy fell to **0.642**,
+recovering to 0.886 only after a corrective procedure. The study covers 19 flood events in Campo
+de Cartagena, Spain.
+
+Citing 0.941 alone overstates how well SAR flood detection validates out of sample. If you use
+this paper to support SAR as a validation reference for SFED labels, the 0.642 figure belongs in
+the same sentence.
+
+### Confirmed as stated
+
+| # | Claim | Status |
+|---|---|---|
+| 62 | Benefit–cost ratio 24–73 depending on scenario | ✓ |
+| 62 | "Improving the forecast lead time by 1 h can increase the current savings by 1.83 times" | ✓ verbatim |
+| 62 | 453 household surveys, 30 focus groups, 40 key-informant interviews | ✓ |
+| 62 | NPR 117,027 / USD 1,083 saved per household | ✓ |
+| 64 | EFAS returns "of the order of 400 Euro for every 1 Euro invested" | ✓ — the source was right to reject the 159:1 figure |
+| 9 | XGBoost best at 91% overall accuracy | ✓ — ROC-AUC 0.89; SVM 88%/0.82, ANN 85%/0.86 |
+| 9 | 20 conditioning factors, 1,164 flood/non-flood points, 1998–2023 | ✓ |
+| 27 | 913 large flood events, 2000–2018 | ✓ |
+| 27 | ~2.23 million km² total inundation | ✓ |
+| 27 | 255–290 million people directly affected | ✓ |
+| 27 | 20–24% rise in proportion exposed, ten times previous estimates | ✓ |
+| 58 | XGBoost best, RMSE 0.333, AUC 0.890 | ✓ |
+| 58 | Distance-to-stream, then TWI, then elevation most important | ✓ rank order confirmed |
+| 43 | 7-year rainfall on saturated soil → 100-year flood | ✓ |
+| 43 | 200-year rainfall on dry soil → 15-year flood | ✓ |
+| 36 | 44% good/excellent/almost perfect; 66% excluding cloud-obscured cases | ✓ — 33% were "too many clouds" |
+| 40 | GPM-IMERG v07, CHIRPS 2.0, CPC-CMORPH, PERSIANN-CDR vs Nigerian gauges | ✓ |
+| 40 | Niger Central Hydrological Area, 2013–2022 | ✓ — five gauging stations |
+
+### One finding the source document missed, and you should not
+
+Entry 40 is your most important rainfall citation, and its headline result is a warning about
+this dissertation's own design. The best-performing product was **PERSIANN-CDR**, not IMERG or
+CHIRPS — and its median correlation against Nigerian gauges was **0.33 at daily resolution**,
+rising to 0.86 only at monthly resolution (POD 85%).
+
+A daily correlation of 0.33 is the operating regime your model sits in. It does not invalidate
+daily modelling, but it does mean satellite rainfall error is a first-order limitation rather
+than a footnote, it strengthens the case for the multi-product robustness check, and it predicts
+that predictive skill will be materially better for accumulated antecedent features (7-, 14-,
+30-day windows) than for same-day rainfall. Say so in the limitations section before an examiner
+says it for you.
+
+---
+
+## What this report still does not cover
 
 The FloodScan position stands: there is no dedicated peer-reviewed FloodScan validation article.
 Galantowicz & Picton (2021) is the correct peer-reviewed basis, supported by the NTRS report
 (now correctly attributed to **Galantowicz & Frey**) and the HDX product page.
+
+Entry 2 remains unverifiable and dropped. Entries 51 and 52 remain unpublished preprints.

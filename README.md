@@ -123,6 +123,16 @@ two had both the wrong first author and the wrong journal, and one named a first
 author who does not appear on the paper at all. One entry was dropped as
 unverifiable. The verification report lists each correction.
 
-The report is bibliographic only. Numerical claims quoted in the original
-annotations — benefit–cost ratios, reported accuracies — are flagged there as
-unchecked, and several sit on entries whose authorship was wrong.
+Numerical claims in the annotations were checked separately: **20 of 23 are
+correct as quoted**. One is misquoted (entry 34's accuracies are 94.73%/94.71%,
+not 94.3%/94.1%), one is unlabelled (entry 10's 0.93/0.92/0.84 are ROC-AUC, not
+accuracy), and one is incomplete (entry 35's 0.941 is internal cross-validation;
+independent validation gave 0.642).
+
+One result from that check bears directly on this project's design. The best
+satellite rainfall product over Nigerian gauges — PERSIANN-CDR, not IMERG or
+CHIRPS — reaches a median correlation of only **0.33 at daily resolution**,
+against 0.86 monthly (Ganiyu et al., 2025). Daily satellite rainfall error is
+therefore a first-order limitation here, which is part of why the feature set
+leans on multi-day accumulations and the antecedent precipitation index rather
+than same-day rainfall.
