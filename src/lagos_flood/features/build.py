@@ -26,6 +26,10 @@ from .antecedent import (
 
 RAINFALL_COL = "rain_mm"
 SOIL_MOISTURE_COL = "soil_moisture"
+SFED_COL = "sfed_fraction"
+#: SFED minus its day-of-year baseline. Computed by data.floodscan when the HDX
+#: export carries a baseline column.
+SFED_DEVIATION_COL = "sfed_deviation"
 
 #: Per-LGA time-invariant attributes. Terrain drives where water collects;
 #: building density and impervious fraction stand in for exposure and for the
@@ -66,6 +70,8 @@ def build_panel(
     panel = add_api(panel, rainfall_col, config, lga_col=lga_col, date_col=date_col)
 
     lag_spec: dict[str, tuple[int, ...]] = {rainfall_col: config.rain_lag_days}
+    if SFED_COL in panel.columns:
+        lag_spec[SFED_COL] = config.sfed_lag_days
     if soil_moisture_col in panel.columns:
         lag_spec[soil_moisture_col] = config.soil_moisture_lag_days
     panel = add_lag_features(panel, lag_spec, lga_col=lga_col, date_col=date_col)
@@ -91,6 +97,19 @@ def _collect_feature_names(
     names: list[str] = [rainfall_col, "api"]
     names += [f"{rainfall_col}_sum{w}d" for w in config.rain_accum_windows]
     names += [f"{rainfall_col}_lag{n}" for n in config.rain_lag_days]
+
+    # Flood extent: today's value plus the brief's 7/14/30-day lags. These carry
+    # most of the per-LGA signal, because NASA POWER cannot — all 20 LGAs fall
+    # into 2 weather grid cells, so rainfall is near-identical across most of
+    # the state on any given day.
+    if SFED_COL in panel.columns:
+        names.append(SFED_COL)
+        names += [f"{SFED_COL}_lag{n}" for n in config.sfed_lag_days]
+    if SFED_DEVIATION_COL in panel.columns:
+        names.append(SFED_DEVIATION_COL)
+
+    names += [c for c in config.weather_columns if c in panel.columns]
+
     if soil_moisture_col in panel.columns:
         names.append(soil_moisture_col)
         names += [f"{soil_moisture_col}_lag{n}" for n in config.soil_moisture_lag_days]
@@ -140,9 +159,13 @@ def assert_causal_features(
         if len(history) <= DEFAULT.features.max_lookback_days:
             continue
 
+        source_cols = [lga_col, date_col, RAINFALL_COL]
+        source_cols += [
+            c for c in (SFED_COL, SFED_DEVIATION_COL, SOIL_MOISTURE_COL, *DEFAULT.features.weather_columns)
+            if c in history.columns
+        ]
         rebuilt, rebuilt_names = build_panel(
-            history[[lga_col, date_col, RAINFALL_COL]
-                    + ([SOIL_MOISTURE_COL] if SOIL_MOISTURE_COL in history else [])].copy(),
+            history[source_cols].copy(),
             None,
             DEFAULT.features,
             lga_col=lga_col,
@@ -167,6 +190,8 @@ def assert_causal_features(
 
 __all__ = [
     "RAINFALL_COL",
+    "SFED_COL",
+    "SFED_DEVIATION_COL",
     "SOIL_MOISTURE_COL",
     "STATIC_FEATURES",
     "assert_causal_features",

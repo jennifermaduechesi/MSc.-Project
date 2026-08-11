@@ -103,6 +103,11 @@ class FeatureConfig:
 
     rain_lag_days: tuple[int, ...] = (1, 2, 3, 5, 7)
     rain_accum_windows: tuple[int, ...] = (3, 7, 14, 30)
+    #: Lagged flood extent. The brief asks for 7, 14 and 30 days. SFED at t-k is
+    #: observed by time t, and the target sits at t+h, so these are causal.
+    sfed_lag_days: tuple[int, ...] = (7, 14, 30)
+    #: NASA POWER variables carried through as features alongside rainfall.
+    weather_columns: tuple[str, ...] = ("temp_c", "humidity_pct")
     soil_moisture_lag_days: tuple[int, ...] = (1, 3, 7)
     #: Antecedent Precipitation Index decay constant (Heggen, 2001). 0.85–0.95 is
     #: the usual range; lower values forget past rainfall faster.
@@ -117,6 +122,7 @@ class FeatureConfig:
         return max(
             max(self.rain_lag_days, default=0),
             max(self.rain_accum_windows, default=0),
+            max(self.sfed_lag_days, default=0),
             max(self.soil_moisture_lag_days, default=0),
             self.api_window_days,
         )

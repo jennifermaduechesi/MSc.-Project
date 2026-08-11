@@ -68,10 +68,15 @@ project direction unless Jennifer explicitly asks.
 
 ## Known data constraints — state these in the methodology
 
-- **NASA POWER resolution collapses the study area.** All 20 LGAs fall into only
-  ~3 distinct NASA POWER grid cells (~50–55 km). Weather features therefore act
-  as a *shared seasonal driver*; SFED carries most of the per-LGA signal. This
-  must be addressed explicitly in methodology and feature-importance analysis.
+- **NASA POWER resolution collapses the study area — worse than first recorded.**
+  Measured with `nasapower.grid_collapse_report()`, the 20 LGAs fall into just
+  **2** distinct NASA POWER grid cells (MERRA-2 grid, 0.5° lat × 0.625° lon),
+  and **16 of the 20 share a single cell**. Those 16 receive byte-identical
+  rainfall, temperature and humidity. Weather is therefore a *shared seasonal
+  driver*, not a per-LGA signal — SFED and static geography carry everything
+  that separates one LGA from another. State this in the methodology, and read
+  any high-ranking weather feature as telling you about season, not place.
+  (Centroids are approximate; recheck once GRID3 polygon centroids are in.)
 - **NiHSA is a snapshot, not an archive.** Must be logged as dated snapshots.
 - **FloodScan history is ~24 years, longer than the brief assumed (~10).** More
   rare Critical events available, but more cleaning.
@@ -88,13 +93,21 @@ machine and are **not yet in this repo**:
 `01lgareference.py`, `lgautils.py`, `02pullnasapower.py`, `03loadfloodscan.py`,
 `04loadnihsa.py`, `READMEdatacollection.md`, `requirements.txt`, `PHASE1SUMMARY.md`
 
-**In this repo:** verified literature (`docs/literature/`) and a modelling
-scaffold (`src/lagos_flood/`, 42 tests passing).
+**In this repo:** verified literature (`docs/literature/`) and a working
+pipeline (`src/lagos_flood/`, 97 tests passing).
 
-**Scaffold caveat:** `data/floodscan.py` and `data/climate.py` were written
-before the brief was available and assume the wrong sources (raster GIS,
-ERA5/CHIRPS). Neither has ever been run. They need replacing with NASA POWER and
-HDX Excel loaders. Everything else in the scaffold matches the brief.
+**Data layer now matches the brief.** `data/climate.py` (ERA5/CHIRPS) has been
+deleted. In its place:
+- `data/lga_reference.py` — the 20 LGAs, `lga_id`, centroids, name resolution
+- `data/nasapower.py` — NASA POWER client, grid-cell dedup, −999 cleanup,
+  retries, resume-from-cache. **Verified against the live API.**
+- `data/floodscan.py` — rewritten for HDX Excel/CSV with HXL tag rows,
+  flexible column matching, Lagos filtering, `lga_id` mapping
+
+Features now include the brief's lagged SFED (7/14/30), SFED deviation from
+baseline, temperature and humidity. Soil moisture is gone — it came from
+ERA5-Land, which is not a source for this project; the antecedent precipitation
+index covers antecedent wetness from rainfall instead.
 
 **Open questions for the supervisor:**
 - Full ~24 years of FloodScan, or a narrower window?
