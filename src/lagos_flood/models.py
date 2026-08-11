@@ -21,8 +21,46 @@ from typing import Any, Protocol
 
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
 
-from .config import ModelConfig
+from .config import RISK_CLASSES, ModelConfig
+
+#: Feature holding the class observed at time t. Persistence predicts t+h from it.
+PERSISTENCE_FEATURE = "risk_class_current"
+
+
+class PersistenceBaseline:
+    """Predict that the class at t+h is whatever it was at t.
+
+    The brief calls this essential, and it is: if a random forest cannot beat
+    "assume tomorrow looks like today", the honest conclusion is that the
+    engineered features add nothing, and that conclusion has to be reached
+    deliberately rather than discovered by an examiner.
+
+    It is a genuine forecast, not a cheat. The class at t is known at forecast
+    time; only the class at t+h is withheld. The model reads a single column and
+    ignores everything else, so any ML model is being handed strictly more
+    information and has no excuse for losing.
+    """
+
+    def __init__(self, column_index: int = 0):
+        self.column_index = column_index
+        self.classes_: np.ndarray | None = None
+
+    def fit(self, X: Any, y: Any = None, **kwargs: Any) -> PersistenceBaseline:
+        self.classes_ = np.unique(y) if y is not None else np.arange(len(RISK_CLASSES))
+        return self
+
+    def predict(self, X: Any) -> np.ndarray:
+        return np.rint(np.asarray(X)[:, self.column_index]).astype(int)
+
+    def predict_proba(self, X: Any) -> np.ndarray:
+        preds = self.predict(X)
+        out = np.zeros((len(preds), len(RISK_CLASSES)), dtype=float)
+        out[np.arange(len(preds)), np.clip(preds, 0, len(RISK_CLASSES) - 1)] = 1.0
+        return out
 
 
 class Classifier(Protocol):  # pragma: no cover - structural typing only
@@ -31,14 +69,39 @@ class Classifier(Protocol):  # pragma: no cover - structural typing only
     def predict_proba(self, X: Any) -> np.ndarray: ...
 
 
-def build_model(name: str, config: ModelConfig | None = None) -> Classifier:
-    """Construct one of ``random_forest``, ``xgboost`` or ``lightgbm``.
+def build_model(
+    name: str,
+    config: ModelConfig | None = None,
+    *,
+    persistence_column_index: int = 0,
+) -> Classifier:
+    """Construct a model by name.
 
-    XGBoost and LightGBM are optional dependencies; if one is missing the error
-    names the extra to install rather than surfacing a bare ImportError.
+    Available: ``persistence``, ``logistic_regression``, ``random_forest``,
+    ``xgboost``, ``lightgbm``. The first two need only scikit-learn; XGBoost and
+    LightGBM are optional dependencies, and if one is missing the error names the
+    extra to install rather than surfacing a bare ImportError.
     """
     cfg = config or ModelConfig()
     key = name.lower().replace("-", "_")
+
+    if key in {"persistence", "baseline"}:
+        return PersistenceBaseline(column_index=persistence_column_index)
+
+    if key in {"logistic_regression", "logreg", "lr"}:
+        # Scaled, because the features span millimetres of rain, dimensionless
+        # indices and building counts per km² — unscaled, the largest-magnitude
+        # feature dominates the penalty term for reasons of unit choice alone.
+        return make_pipeline(
+            StandardScaler(),
+            # No n_jobs: it has had no effect on LogisticRegression since
+            # scikit-learn 1.8 and is removed in 1.10.
+            LogisticRegression(
+                max_iter=2000,
+                class_weight=cfg.class_weight,
+                random_state=cfg.random_state,
+            ),
+        )
 
     if key in {"random_forest", "rf"}:
         return RandomForestClassifier(
@@ -135,7 +198,9 @@ def resample_training_fold(
 
 
 __all__ = [
+    "PERSISTENCE_FEATURE",
     "Classifier",
+    "PersistenceBaseline",
     "build_model",
     "resample_training_fold",
     "sample_weights_balanced",

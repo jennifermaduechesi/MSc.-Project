@@ -9,6 +9,7 @@ from lagos_flood.config import Config, LabelConfig, ModelConfig, ValidationConfi
 from lagos_flood.data.synthetic import make_synthetic_panel
 from lagos_flood.evaluate import evaluate, per_lga_breakdown
 from lagos_flood.labels import LABEL_INT_COL
+from lagos_flood.models import PERSISTENCE_FEATURE
 from lagos_flood.pipeline import TARGET_COL, prepare_dataset, run_experiment
 from lagos_flood.validation import temporal_holdout
 
@@ -138,6 +139,62 @@ def test_evaluate_keeps_absent_classes_in_the_macro_average():
     assert result.macro_f1 == pytest.approx(0.5)
     assert result.per_class.loc["Critical", "f1"] == 0.0
     assert result.confusion.shape == (4, 4)
+
+
+def test_compare_models_flags_whether_persistence_was_beaten(prepared, small_config):
+    """The gate the brief calls essential has to be answered in the table itself."""
+    from lagos_flood.pipeline import compare_models
+
+    panel, features = prepared
+    table, results = compare_models(
+        panel, features, model_names=("persistence", "random_forest"), config=small_config
+    )
+
+    assert set(table["model"]) == {"persistence", "random_forest"}
+    assert "beats_persistence" in table.columns
+
+    # The persistence row holds NA, not a self-comparison.
+    persistence_row = table[table["model"] == "persistence"]["beats_persistence"]
+    assert persistence_row.isna().all()
+
+    # And the RF verdict matches the macro-F1 numbers it was derived from.
+    floor = results["persistence"].test_result.macro_f1
+    rf = table[table["model"] == "random_forest"].iloc[0]
+    assert bool(rf["beats_persistence"]) == (rf["test_macro_f1"] > floor)
+
+
+def test_persistence_runs_through_the_full_pipeline(prepared, small_config):
+    """Persistence must score on exactly the same split as every other model."""
+    panel, features = prepared
+    result = run_experiment(panel, features, "persistence", small_config)
+
+    assert 0.0 <= result.test_result.macro_f1 <= 1.0
+    assert result.test_result.n_samples > 0
+    # It predicts the current class verbatim, so predictions match that column.
+    current = result.test_frame[PERSISTENCE_FEATURE].to_numpy().round().astype(int)
+    assert np.array_equal(result.test_frame["prediction"].to_numpy(), current)
+
+
+def test_pipeline_rejects_a_panel_without_the_persistence_feature(prepared, small_config):
+    panel, features = prepared
+    stripped = [f for f in features if f != PERSISTENCE_FEATURE]
+    with pytest.raises(ValueError, match="persistence baseline has nothing to read"):
+        run_experiment(panel, stripped, "random_forest", small_config)
+
+
+def test_risk_history_features_are_present_and_causal(prepared):
+    """Both risk-history features are built from labels at or before time t."""
+    panel, features = prepared
+    assert PERSISTENCE_FEATURE in features
+    assert "risk_days_elevated_30d" in features
+
+    # risk_class_current is exactly the label at t, not the target at t+h.
+    assert np.array_equal(
+        panel[PERSISTENCE_FEATURE].to_numpy().round().astype(int),
+        panel[LABEL_INT_COL].to_numpy().astype(int),
+    )
+    # The 30-day elevated count can never exceed its own window.
+    assert panel["risk_days_elevated_30d"].between(0, 30).all()
 
 
 def test_per_lga_breakdown_sorts_worst_first():

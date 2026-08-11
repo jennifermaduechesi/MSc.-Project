@@ -19,7 +19,7 @@ from .config import DEFAULT, Config
 from .evaluate import EvaluationResult, aggregate_folds, evaluate, per_lga_breakdown
 from .features.build import assert_causal_features, build_panel
 from .labels import LABEL_INT_COL, apply_thresholds, class_distribution, fit_thresholds
-from .models import build_model, sample_weights_balanced
+from .models import PERSISTENCE_FEATURE, build_model, sample_weights_balanced
 from .validation import (
     assert_no_temporal_leakage,
     build_forecast_target,
@@ -95,6 +95,28 @@ def prepare_dataset(
     thresholds = fit_thresholds(panel.loc[dev_mask], config.label)
     panel = apply_thresholds(panel, thresholds)
 
+    # Risk-history features, added after labelling because they are built from the
+    # labels themselves. Both are known at time t and the target sits at t+h, so
+    # both are causal: today's risk class is observed, tomorrow's is not.
+    #
+    # risk_class_current is what the persistence baseline predicts from. Giving it
+    # to every model too is deliberate — the brief lists an "LGA risk-history flag"
+    # as a planned feature, and it makes the comparison strictly fair, since the ML
+    # models then hold everything persistence holds and more.
+    panel = panel.sort_values(["lga", "date"]).reset_index(drop=True)
+    panel[PERSISTENCE_FEATURE] = panel[LABEL_INT_COL].astype(float)
+
+    elevated = (panel[LABEL_INT_COL] >= 2).astype(float)
+    panel["risk_days_elevated_30d"] = (
+        elevated.groupby(panel["lga"])
+        .rolling(30, min_periods=30)
+        .sum()
+        .reset_index(level=0, drop=True)
+    )
+
+    feature_names = [*feature_names, PERSISTENCE_FEATURE, "risk_days_elevated_30d"]
+    panel = panel.dropna(subset=feature_names).reset_index(drop=True)
+
     panel = build_forecast_target(
         panel, config.validation.lead_time_days, label_col=LABEL_INT_COL, target_col=TARGET_COL
     )
@@ -120,10 +142,18 @@ def run_experiment(
     X_dev = dev[feature_names].to_numpy(dtype=float)
     y_dev = dev[TARGET_COL].to_numpy(dtype=int)
 
+    if PERSISTENCE_FEATURE not in feature_names:
+        raise ValueError(
+            f"{PERSISTENCE_FEATURE!r} is missing from the feature list, so the "
+            "persistence baseline has nothing to read. Build the panel with "
+            "prepare_dataset()."
+        )
+    persistence_idx = feature_names.index(PERSISTENCE_FEATURE)
+
     fold_results: list[EvaluationResult] = []
     for fold in expanding_window_folds(dev, config.validation.n_folds, embargo_days=embargo):
         assert_no_temporal_leakage(dev, fold.train_idx, fold.valid_idx, embargo_days=embargo)
-        model = build_model(model_name, config.model)
+        model = build_model(model_name, config.model, persistence_column_index=persistence_idx)
         _fit(model, X_dev[fold.train_idx], y_dev[fold.train_idx], model_name)
         preds = model.predict(X_dev[fold.valid_idx])
         result = evaluate(y_dev[fold.valid_idx], preds)
@@ -137,7 +167,7 @@ def run_experiment(
         )
 
     # Refit on the whole development period, then touch the test set once.
-    final_model = build_model(model_name, config.model)
+    final_model = build_model(model_name, config.model, persistence_column_index=persistence_idx)
     _fit(final_model, X_dev, y_dev, model_name)
 
     X_test = test[feature_names].to_numpy(dtype=float)
@@ -164,10 +194,22 @@ def run_experiment(
 def compare_models(
     panel: pd.DataFrame,
     feature_names: list[str],
-    model_names: tuple[str, ...] = ("random_forest", "xgboost", "lightgbm"),
+    model_names: tuple[str, ...] = (
+        "persistence",
+        "logistic_regression",
+        "random_forest",
+        "xgboost",
+        "lightgbm",
+    ),
     config: Config = DEFAULT,
 ) -> tuple[pd.DataFrame, dict[str, ExperimentResult]]:
     """Run several models over identical splits and tabulate them side by side.
+
+    Persistence runs first and by default. The output carries a
+    ``beats_persistence`` column so the comparison the brief calls essential is
+    answered in the table itself rather than left to the reader — a model that
+    cannot beat "assume tomorrow looks like today" has not earned a write-up,
+    and that has to be visible.
 
     A model that is unavailable (optional dependency missing) is skipped with a
     warning rather than aborting the comparison.
@@ -193,7 +235,15 @@ def compare_models(
         )
     if not rows:
         raise RuntimeError("no models could be run — install at least scikit-learn")
-    return pd.DataFrame(rows).sort_values("test_macro_f1", ascending=False), results
+
+    table = pd.DataFrame(rows).sort_values("test_macro_f1", ascending=False)
+    if "persistence" in results:
+        floor = results["persistence"].test_result.macro_f1
+        # Nullable boolean, not plain bool: the persistence row itself holds NA
+        # rather than a self-comparison, and plain bool cannot store NA.
+        table["beats_persistence"] = (table["test_macro_f1"] > floor).astype("boolean")
+        table.loc[table["model"] == "persistence", "beats_persistence"] = pd.NA
+    return table, results
 
 
 def _fit(model, X: np.ndarray, y: np.ndarray, model_name: str) -> None:
